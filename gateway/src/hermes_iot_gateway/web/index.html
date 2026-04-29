@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes IoT WebRTC Tester</title>
+    <link rel="stylesheet" href="/debug/webrtc/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Hermes IoT Gateway</p>
+        <h1>Browser voice device</h1>
+        <p class="lede">
+          Talk through the browser using the same WebRTC signaling, microphone stream, speaker output, and control channel used by the Echo Pyramid firmware.
+        </p>
+      </section>
+
+      <section class="panel controls">
+        <label>
+          Gateway
+          <input id="gatewayUrl" autocomplete="off" />
+        </label>
+        <label>
+          Device ID
+          <input id="deviceId" autocomplete="off" />
+        </label>
+        <label>
+          Firmware
+          <input id="firmwareVersion" value="browser-dev" autocomplete="off" />
+        </label>
+        <label class="check">
+          <input id="useMic" type="checkbox" checked />
+          Use microphone
+        </label>
+        <div class="buttons">
+          <button id="connect">Start Voice Session</button>
+          <button id="disconnect" class="secondary" disabled>Disconnect</button>
+          <button id="interrupt" class="secondary" disabled>Interrupt</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>State</h2>
+          <div class="status">
+            <span id="connectionDot" class="dot"></span>
+            <span id="connectionState">idle</span>
+          </div>
+          <dl class="facts">
+            <div>
+              <dt>Conversation</dt>
+              <dd id="conversation">-</dd>
+            </div>
+            <div>
+              <dt>Session</dt>
+              <dd id="sessionId">-</dd>
+            </div>
+            <div>
+              <dt>Assistant</dt>
+              <dd id="assistantState">-</dd>
+            </div>
+          </dl>
+          <audio id="remoteAudio" autoplay controls></audio>
+        </article>
+
+        <article class="panel">
+          <h2>Live Speech</h2>
+          <p class="hint">Speak naturally after the session connects. Deepgram Flux turn detection triggers Hermes; no push-to-talk.</p>
+          <dl class="facts">
+            <div>
+              <dt>Heard</dt>
+              <dd id="heardText">-</dd>
+            </div>
+            <div>
+              <dt>Assistant</dt>
+              <dd id="assistantText">-</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="panel debugText">
+          <h2>Debug Text</h2>
+          <p class="hint">Optional shortcut: sends a <code>debug.user_text</code> data-channel event without using STT.</p>
+          <textarea id="debugText" rows="4">hello from the browser tester</textarea>
+          <button id="sendText" disabled>Send Text Turn</button>
+      </section>
+
+      <section class="panel">
+        <div class="logHeader">
+          <h2>Events</h2>
+          <button id="clearLog" class="secondary">Clear</button>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script src="/debug/webrtc/assets/app.js" type="module"></script>
+  </body>
+</html>

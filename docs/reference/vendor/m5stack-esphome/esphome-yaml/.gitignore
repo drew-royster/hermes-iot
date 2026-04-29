@@ -1,0 +1,19 @@
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+__pycache__/
+
+.venv/
+.esphome
+
+secrets.yaml
+# some todo files
+TODO
+# Test folder
+test
+# Temp folder for 3rd party libraries
+third_party
+# clangd config
+.clangd

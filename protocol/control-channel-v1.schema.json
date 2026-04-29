@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/hermes-iot/control-channel-v1.schema.json",
+  "title": "Hermes IoT Control Channel v1",
+  "type": "object",
+  "required": ["type", "payload", "timestamp"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "device.state",
+        "assistant.state",
+        "assistant.text.delta",
+        "tool.progress",
+        "audio.input.level",
+        "audio.stats",
+        "debug.user_text",
+        "interrupt",
+        "mute.set",
+        "volume.set",
+        "device.command",
+        "error"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

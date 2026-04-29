@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+dist/
+build/
+.DS_Store
+.env
+var/
+firmware/echo-pyramid/build/
+firmware/echo-pyramid/sdkconfig
+firmware/echo-pyramid/sdkconfig.old
+firmware/echo-pyramid/managed_components/
+firmware/aec-lab/build/
+firmware/aec-lab/sdkconfig
+firmware/aec-lab/sdkconfig.old
+firmware/aec-lab/managed_components/

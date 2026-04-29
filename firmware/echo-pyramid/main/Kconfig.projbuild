@@ -1,0 +1,41 @@
+menu "Hermes IoT Firmware"
+
+config HERMES_IOT_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    help
+        SSID for the Wi-Fi network the Echo Pyramid should join.
+
+config HERMES_IOT_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    help
+        Password for the Wi-Fi network.
+
+config HERMES_IOT_GATEWAY_BASE_URL
+    string "Gateway base URL"
+    default "http://192.168.1.2:8000"
+    help
+        Base URL for the Hermes IoT gateway, for example http://192.168.1.2:8000.
+
+config HERMES_IOT_DEVICE_ID
+    string "Device ID"
+    default "echo-pyramid-dev"
+    help
+        Stable device identifier reported to the gateway.
+
+config HERMES_IOT_FIRMWARE_VERSION
+    string "Firmware version"
+    default "0.1.0"
+    help
+        Firmware version string reported during device claim.
+
+config HERMES_IOT_BOOT_AEC_PROBE
+    bool "Run AEC ground-truth probe on boot"
+    default n
+    help
+        Play a local test tone after audio init and log MIC/ref/AEC probe
+        metrics before starting the normal gateway loop. Intended only for
+        Echo Pyramid AEC bring-up.
+
+endmenu

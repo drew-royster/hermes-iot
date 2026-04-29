@@ -1,0 +1,24 @@
+name: hermes_iot
+version: 0.1.0
+description: Hermes IoT helper tools for device-aware voice sessions.
+provides_tools:
+  - iot_get_device_context
+  - iot_set_led
+  - iot_beep
+  - iot_get_time
+  - iot_set_timer
+  - iot_cleanup_game
+  - iot_cleanup_status
+  - iot_cleanup_stop
+  - iot_end_conversation
+  - iot_media_status
+  - iot_media_start
+  - iot_media_stop
+  - iot_media_search
+  - iot_media_play
+  - iot_media_pause
+  - iot_media_resume
+  - iot_media_next
+  - iot_media_volume
+provides_hooks:
+  - pre_llm_call
