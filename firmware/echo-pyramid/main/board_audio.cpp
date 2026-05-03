@@ -13,9 +13,9 @@
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
-#include "driver/i2s_tdm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/i2s_tdm.h"
 
 namespace {
 
@@ -26,16 +26,15 @@ constexpr size_t kVoiceDownsampleRatio = kSampleRate / kVoiceSampleRate;
 static_assert(kSampleRate % kVoiceSampleRate == 0,
               "Audio sample rate must be an integer multiple of voice sample rate");
 constexpr float kDefaultMicGainDb = 30.0f;
-constexpr uint8_t kEs7210Mic1VoiceGainReg = 0x1A;
+constexpr uint8_t kEs7210Mic1VoiceGainReg = 0x18;
 constexpr uint8_t kEs7210Mic3ReferenceGainReg = 0x1E;
 constexpr size_t kMicCaptureChannels = 4;
-constexpr size_t kPlaybackChannels = 2;
+constexpr size_t kPlaybackChannels = 4;
 constexpr size_t kAecMicSlot = 0;
 constexpr size_t kAecRefSlot = 1;
-constexpr uint16_t kTdmAllSlotsMask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
-                                      ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) |
-                                      ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) |
-                                      ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3);
+constexpr uint16_t kMicReferenceSlotMask =
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kAecMicSlot) |
+    ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kAecRefSlot);
 constexpr bool kAecEnabled = true;
 constexpr int kAecFilterLength = 4;
 constexpr int kAecMicChannels = 1;
@@ -829,27 +828,14 @@ esp_err_t init_i2s() {
   tx_cfg.gpio_cfg.invert_flags.bclk_inv = false;
   tx_cfg.gpio_cfg.invert_flags.ws_inv = false;
 
-  i2s_tdm_config_t rx_cfg = {};
-  rx_cfg.clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(kSampleRate);
-  rx_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
-  rx_cfg.slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
-      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO,
-      static_cast<i2s_tdm_slot_mask_t>(I2S_TDM_SLOT0 | I2S_TDM_SLOT1 |
-                                       I2S_TDM_SLOT2 | I2S_TDM_SLOT3));
-  rx_cfg.slot_cfg.total_slot = kMicCaptureChannels;
-  rx_cfg.gpio_cfg.mclk = GPIO_NUM_NC;
-  rx_cfg.gpio_cfg.bclk = kEchoPyramidBoardConfig.i2s_bclk;
-  rx_cfg.gpio_cfg.ws = kEchoPyramidBoardConfig.i2s_lrck;
+  i2s_std_config_t rx_cfg = tx_cfg;
   rx_cfg.gpio_cfg.dout = GPIO_NUM_NC;
   rx_cfg.gpio_cfg.din = kEchoPyramidBoardConfig.i2s_din;
-  rx_cfg.gpio_cfg.invert_flags.mclk_inv = false;
-  rx_cfg.gpio_cfg.invert_flags.bclk_inv = false;
-  rx_cfg.gpio_cfg.invert_flags.ws_inv = false;
 
   ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx_handle, &tx_cfg), TAG,
                       "Failed to init I2S TX standard mode");
-  ESP_RETURN_ON_ERROR(i2s_channel_init_tdm_mode(s_rx_handle, &rx_cfg), TAG,
-                      "Failed to init I2S RX TDM");
+  ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_rx_handle, &rx_cfg), TAG,
+                      "Failed to init I2S RX standard mode");
   return ESP_OK;
 }
 
@@ -860,38 +846,51 @@ esp_err_t configure_stream_i2s_mode() {
 
   ESP_ERROR_CHECK_WITHOUT_ABORT(i2s_channel_disable(s_tx_handle));
   ESP_ERROR_CHECK_WITHOUT_ABORT(i2s_channel_disable(s_rx_handle));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(i2s_del_channel(s_tx_handle));
+  ESP_ERROR_CHECK_WITHOUT_ABORT(i2s_del_channel(s_rx_handle));
+  s_tx_handle = nullptr;
+  s_rx_handle = nullptr;
 
-  i2s_std_clk_config_t tx_clk = I2S_STD_CLK_DEFAULT_CONFIG(kSampleRate);
-  tx_clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
-  i2s_std_slot_config_t tx_slot = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
-  tx_slot.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
-  tx_slot.ws_width = 32;
+  i2s_chan_config_t chan_cfg = {};
+  chan_cfg.id = kEchoPyramidBoardConfig.i2s_port;
+  chan_cfg.role = I2S_ROLE_MASTER;
+  chan_cfg.dma_desc_num = 6;
+  chan_cfg.dma_frame_num = 240;
+  chan_cfg.auto_clear_after_cb = true;
+  chan_cfg.auto_clear_before_cb = false;
+  chan_cfg.allow_pd = false;
+  chan_cfg.intr_priority = 0;
+  ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &s_tx_handle, &s_rx_handle),
+                      TAG, "Failed to allocate TDM I2S channels");
 
-  i2s_tdm_clk_config_t rx_clk = I2S_TDM_CLK_DEFAULT_CONFIG(kSampleRate);
-  rx_clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
-  i2s_tdm_slot_config_t rx_slot = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
+  i2s_tdm_config_t tdm_cfg = {};
+  tdm_cfg.clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(kSampleRate);
+  tdm_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+  tdm_cfg.slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
       I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO,
       static_cast<i2s_tdm_slot_mask_t>(I2S_TDM_SLOT0 | I2S_TDM_SLOT1 |
                                        I2S_TDM_SLOT2 | I2S_TDM_SLOT3));
-  rx_slot.total_slot = kMicCaptureChannels;
+  tdm_cfg.slot_cfg.total_slot = 4;
+  tdm_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT;
+  tdm_cfg.gpio_cfg.mclk = GPIO_NUM_NC;
+  tdm_cfg.gpio_cfg.bclk = kEchoPyramidBoardConfig.i2s_bclk;
+  tdm_cfg.gpio_cfg.ws = kEchoPyramidBoardConfig.i2s_lrck;
+  tdm_cfg.gpio_cfg.dout = kEchoPyramidBoardConfig.i2s_dout;
+  tdm_cfg.gpio_cfg.din = kEchoPyramidBoardConfig.i2s_din;
+  tdm_cfg.gpio_cfg.invert_flags.mclk_inv = false;
+  tdm_cfg.gpio_cfg.invert_flags.bclk_inv = false;
+  tdm_cfg.gpio_cfg.invert_flags.ws_inv = false;
 
-  ESP_RETURN_ON_ERROR(i2s_channel_reconfig_std_clock(s_tx_handle, &tx_clk), TAG,
-                      "Failed to restore I2S TX clock");
-  ESP_RETURN_ON_ERROR(i2s_channel_reconfig_std_slot(s_tx_handle, &tx_slot), TAG,
-                      "Failed to restore I2S TX standard stereo slots");
-  ESP_RETURN_ON_ERROR(i2s_channel_reconfig_tdm_clock(s_rx_handle, &rx_clk), TAG,
-                      "Failed to restore I2S RX TDM clock");
-  ESP_RETURN_ON_ERROR(i2s_channel_reconfig_tdm_slot(s_rx_handle, &rx_slot), TAG,
-                      "Failed to restore I2S RX TDM slots");
+  ESP_RETURN_ON_ERROR(i2s_channel_init_tdm_mode(s_tx_handle, &tdm_cfg), TAG,
+                      "Failed to init I2S TX TDM mode");
+  ESP_RETURN_ON_ERROR(i2s_channel_init_tdm_mode(s_rx_handle, &tdm_cfg), TAG,
+                      "Failed to init I2S RX TDM mode");
   ESP_RETURN_ON_ERROR(i2s_channel_enable(s_rx_handle), TAG,
                       "Failed to enable I2S RX");
   ESP_RETURN_ON_ERROR(i2s_channel_enable(s_tx_handle), TAG,
                       "Failed to enable I2S TX");
 
-  ESP_LOGI(TAG,
-           "I2S stream mode ready: TX standard stereo 16-bit/32-slot, RX TDM "
-           "4x16-bit");
+  ESP_LOGI(TAG, "I2S stream mode ready: TX/RX 4-slot TDM 16-bit slots");
   return ESP_OK;
 }
 
@@ -940,8 +939,7 @@ esp_err_t init_codecs() {
   es7210_codec_cfg_t es7210_cfg = {};
   es7210_cfg.ctrl_if = audio_codec_new_i2c_ctrl(&es7210_i2c_cfg);
   es7210_cfg.master_mode = false;
-  es7210_cfg.mic_selected =
-      ES7120_SEL_MIC1 | ES7120_SEL_MIC2 | ES7120_SEL_MIC3 | ES7120_SEL_MIC4;
+  es7210_cfg.mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC3;
   es7210_cfg.mclk_src = ES7210_MCLK_FROM_PAD;
   es7210_cfg.mclk_div = 256;
 
@@ -963,7 +961,7 @@ esp_err_t init_codecs() {
   ESP_RETURN_ON_ERROR(esp_codec_dev_open(s_speaker_dev, &sample_info), TAG,
                       "Failed to open speaker codec");
   sample_info.channel = kMicCaptureChannels;
-  sample_info.channel_mask = kTdmAllSlotsMask;
+  sample_info.channel_mask = kMicReferenceSlotMask;
   ESP_RETURN_ON_ERROR(esp_codec_dev_open(s_mic_dev, &sample_info), TAG,
                       "Failed to open microphone codec");
   ESP_RETURN_ON_ERROR(esp_codec_dev_set_in_gain(s_mic_dev, kDefaultMicGainDb), TAG,
@@ -983,11 +981,11 @@ esp_err_t init_codecs() {
   ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x01, clock_reg), TAG,
                       "Failed to enable ES7210 ADC clocks");
   ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x08, 0x20), TAG,
-                      "Failed to set ES7210 M5 slave/TDM mode register");
+                      "Failed to set ES7210 M5 slave mode register");
   ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x13, 0x00), TAG,
                       "Failed to disable ES7210 automute");
   ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x12, 0x02), TAG,
-                      "Failed to enable ES7210 TDM mode");
+                      "Failed to set ES7210 4-slot TDM mode");
   ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x43,
                                               kEs7210Mic1VoiceGainReg),
                       TAG,
@@ -996,8 +994,6 @@ esp_err_t init_codecs() {
                                               kEs7210Mic3ReferenceGainReg),
                       TAG,
                       "Failed to set ES7210 MIC3 reference gain register");
-  ESP_RETURN_ON_ERROR(esp_codec_dev_write_reg(s_mic_dev, 0x46, 0x10), TAG,
-                      "Failed to set ES7210 MIC4 unused gain register");
   int reg11 = 0;
   int reg12 = 0;
   int mic1_gain = 0;
@@ -1005,13 +1001,13 @@ esp_err_t init_codecs() {
   ESP_RETURN_ON_ERROR(esp_codec_dev_read_reg(s_mic_dev, 0x11, &reg11), TAG,
                       "Failed to read ES7210 format register");
   ESP_RETURN_ON_ERROR(esp_codec_dev_read_reg(s_mic_dev, 0x12, &reg12), TAG,
-                      "Failed to read ES7210 TDM register");
+                      "Failed to read ES7210 interface register");
   ESP_RETURN_ON_ERROR(esp_codec_dev_read_reg(s_mic_dev, 0x43, &mic1_gain), TAG,
                       "Failed to read ES7210 MIC1 gain register");
   ESP_RETURN_ON_ERROR(esp_codec_dev_read_reg(s_mic_dev, 0x45, &mic3_gain), TAG,
                       "Failed to read ES7210 MIC3 gain register");
   ESP_LOGI(TAG,
-           "ES7210 TDM reference ready clock=0x%02x fmt=0x%02x tdm=0x%02x "
+           "ES7210 MIC1/MIC3 reference ready clock=0x%02x fmt=0x%02x if2=0x%02x "
            "mic1=0x%02x mic3=0x%02x",
            clock_reg, reg11 & 0xff, reg12 & 0xff, mic1_gain & 0xff,
            mic3_gain & 0xff);
@@ -1404,6 +1400,9 @@ esp_err_t board_audio_write(const void *data, size_t size) {
   for (size_t i = 0; i < mono_sample_count; ++i) {
     s_speaker_stereo_buffer[(i * kPlaybackChannels) + 0] = mono[i];
     s_speaker_stereo_buffer[(i * kPlaybackChannels) + 1] = mono[i];
+    for (size_t channel = 2; channel < kPlaybackChannels; ++channel) {
+      s_speaker_stereo_buffer[(i * kPlaybackChannels) + channel] = 0;
+    }
   }
 
   size_t bytes_written = 0;

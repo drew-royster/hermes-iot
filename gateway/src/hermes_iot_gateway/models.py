@@ -63,7 +63,16 @@ class InterruptRequest(BaseModel):
 
 
 class DeviceCommandRequest(BaseModel):
-    type: Literal["set_led", "beep", "display_text", "audio_loopback", "audio.test", "media.mode", "end_conversation"]
+    type: Literal[
+        "set_led",
+        "beep",
+        "display_text",
+        "audio_loopback",
+        "audio.test",
+        "audio.aec_probe",
+        "media.mode",
+        "end_conversation",
+    ]
     payload: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -38,9 +38,9 @@ Useful fields:
   arriving through ES7210 MIC3.
 - `mic_peak` / `mic_rms`: acoustic speaker leakage into MIC1.
 - `aec_peak` / `aec_rms`: ESP-SR output after cancellation.
-- `slot_rms` / `slot_corr`: per-slot TDM diagnostics. Slot 0 should be the
-  voice mic; the strongest playback-reference slot should show clear correlation
-  with slot 0 during the probe.
+- `slot_rms` / `slot_corr`: per-channel capture diagnostics. Slot 0 should be
+  ES7210 MIC1 voice mic; slot 1 should be the ES7210 MIC3 electrical playback
+  reference from the schematic AEC network.
 - `mic_ref_corr`: how strongly raw MIC1 correlates with the reference.
 - `aec_ref_corr`: how strongly the AEC output still correlates with the
   reference.
@@ -57,9 +57,9 @@ suppression_db should be positive.
 ```
 
 If `ref_rms` is near idle noise during playback, the issue is still in the
-ES7210 TDM/reference capture path. If `ref_rms` is strong but `suppression_db`
-is negative, the reference is probably misaligned, inverted, over/under gained,
-or passed into ESP-SR AEC with the wrong framing.
+ES7210 MIC3/reference capture path. If `ref_rms` is strong but
+`suppression_db` is negative, the reference is probably misaligned, inverted,
+over/under gained, or passed into ESP-SR AEC with the wrong framing.
 
 ## Known Good Result
 
@@ -82,6 +82,12 @@ ESP-SR AEC enabled mode=VOIP_HIGH_PERF frame_samples=256 filter_length=4
 ES7210 TDM reference ready clock=0x00 fmt=0x60 tdm=0x02 mic1=0x18 mic3=0x1e
 AW87559 reg[0x01] = 0x78 reg[0x05] = 0x10
 ```
+
+The main firmware was later aligned to the measured-good hardware reference
+path: ES7210 MIC1 + MIC3 only, 4-slot TDM capture, and slot 1 carrying the
+electrical playback reference from the schematic AEC network. Standard stereo
+RX remained useful as a negative control, but did not expose the reference
+channel during the lab reruns.
 
 For normal demo firmware, `CONFIG_HERMES_IOT_BOOT_AEC_PROBE` should be off so
 the device does not play the broadband probe at boot. Keep the command-triggered

@@ -8,7 +8,7 @@ official M5Stack Voice Pyramid examples for the Hermes IoT gateway.
 | Source | URL / local path | Notes |
 | --- | --- | --- |
 | M5 Voice Pyramid Xiaozhi guide | https://docs.m5stack.com/en/guide/realtime/xiaozhi/echo_pyramid | Proves AtomS3R + Voice Pyramid is an official voice-assistant target, but only documents M5Burner firmware flow. |
-| Xiaozhi ESP32 source | https://github.com/78/xiaozhi-esp32 | Public source has M5Stack AtomS3R/Echo Base boards, not a first-class Voice Pyramid board directory at the time reviewed. |
+| Xiaozhi ESP32 source | https://github.com/78/xiaozhi-esp32 | Reviewed upstream for full-duplex state, codec setup, and AEC gating. The source is not vendored in this repo. |
 | M5 Voice Pyramid product docs | https://docs.m5stack.com/en/atom/Echo_Pyramid | Hardware truth for Voice Pyramid: ES8311, ES7210, AW87559, Si5351, STM32 touch/RGB controller. |
 | M5 Voice Pyramid Arduino tutorial | https://docs.m5stack.com/en/arduino/projects/atomic/echo_pyramid | Official M5Echo-Pyramid library path and begin/read/write behavior. |
 | M5 Voice Pyramid ESPHome example | [vendor/m5stack-esphome/echo_pyramid_example.yaml](vendor/m5stack-esphome/echo_pyramid_example.yaml) | Official Home Assistant config for the AtomS3R + Voice Pyramid pairing. |
@@ -120,3 +120,22 @@ Do not port Xiaozhi wholesale. Use it as a design reference for full-duplex
 state, AEC gating, audio queueing, Opus framing, and device diagnostics. Keep
 the Hermes protocol, WebRTC transport, and Hermes `/v1/responses` runtime.
 Keep Voice Pyramid hardware behavior aligned with M5Echo-Pyramid plus ESPHome.
+
+## 2026-05-03 Upstream Check
+
+Upstream `78/xiaozhi-esp32` commit `1847b5893565cf935d113c7931ebb940a4f9c5d8`
+includes a first-class `main/boards/atoms3r-echo-pyramid` target. This
+supersedes the older review assumption that public Xiaozhi source did not yet
+have a Pyramid board directory.
+
+For Echo Pyramid, Xiaozhi creates a custom `PyramidAudioCodec` rather than using
+the generic ES8311 codec class. It sets `duplex_ = true`, creates paired TX/RX
+I2S channels, opens ES8311 as DAC/output, opens ES7210 as input, selects
+`ES7210_SEL_MIC1 | ES7210_SEL_MIC3`, and reports two input channels when
+`AUDIO_INPUT_REFERENCE` is true.
+
+The important caution: this snapshot exposes a hardware reference channel, but
+does not enable `CONFIG_USE_DEVICE_AEC` for the Echo Pyramid build. Its board
+`config.json` only sets the board type, flash size, and 8 MB partition table,
+and `USE_DEVICE_AEC` in `main/Kconfig.projbuild` does not include
+`BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_PYRAMID` in its dependency list.

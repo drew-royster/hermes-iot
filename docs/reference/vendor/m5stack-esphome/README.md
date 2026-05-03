@@ -9,8 +9,8 @@ the AtomS3R + Voice Pyramid / Echo Pyramid pairing.
 | --- | --- |
 | Upstream | https://github.com/m5stack/esphome-yaml |
 | Local snapshot | [esphome-yaml](esphome-yaml) |
-| Commit | `441a4f076c608fb7baa6e0077d1d13f4359a3257` |
-| Retrieved | 2026-04-25 |
+| Commit | `9dcd5199435d1c6d65c43af3bb99b7d999ca7e54` |
+| Retrieved | 2026-05-03 |
 
 The snapshot is vendored without its `.git` directory so this repo can track
 the reference files directly.
