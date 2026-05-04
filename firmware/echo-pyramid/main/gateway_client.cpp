@@ -105,6 +105,9 @@ esp_err_t perform_request(esp_http_client_method_t method, const char *url,
     ESP_LOGE(LOG_TAG, "Gateway request failed: status=%d body=%s", status_code,
              response != nullptr && response->buffer != nullptr ? response->buffer
                                                                 : "");
+    if (status_code == 401) {
+      return ESP_ERR_INVALID_STATE;
+    }
     return ESP_FAIL;
   }
   return ESP_OK;

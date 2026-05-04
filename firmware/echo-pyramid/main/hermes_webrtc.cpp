@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "device_identity.h"
 #include "hermes_media.h"
 #include "main.h"
 #include "freertos/FreeRTOS.h"
@@ -705,6 +706,20 @@ static esp_err_t create_peer_connection() {
 
         GatewayOfferResponse response = {};
         esp_err_t result = gateway_client_post_offer(&s_bootstrap, description, &response);
+        if (result == ESP_ERR_INVALID_STATE) {
+          ESP_LOGW(LOG_TAG, "Offer rejected by gateway; refreshing device claim");
+          GatewayBootstrapInfo refreshed_bootstrap = {};
+          result = gateway_client_claim_device(&refreshed_bootstrap);
+          if (result == ESP_OK) {
+            esp_err_t save_result = device_identity_save(&refreshed_bootstrap);
+            if (save_result != ESP_OK) {
+              ESP_LOGW(LOG_TAG, "Failed to save refreshed device identity: %s",
+                       esp_err_to_name(save_result));
+            }
+            memcpy(&s_bootstrap, &refreshed_bootstrap, sizeof(s_bootstrap));
+            result = gateway_client_post_offer(&s_bootstrap, description, &response);
+          }
+        }
         if (result != ESP_OK) {
           ESP_LOGE(LOG_TAG, "Offer exchange failed: %s", esp_err_to_name(result));
           board_status_set_state(STATUS_ERROR, "Offer failed");
