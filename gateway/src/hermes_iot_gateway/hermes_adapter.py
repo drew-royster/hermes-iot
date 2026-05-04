@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ from .runtime import GatewayRuntime, create_app, create_native_runtime
 from .spoken_text import IOT_VOICE_SYSTEM_PROMPT, sanitize_spoken_text
 
 logger = logging.getLogger(__name__)
+
+_MEDIA_PAUSE_PATTERN = re.compile(r"\b(?:stop|pause|quiet|silence)\b", re.IGNORECASE)
+_MEDIA_NEXT_PATTERN = re.compile(r"\b(?:skip|next)\b", re.IGNORECASE)
 
 
 def check_iot_requirements() -> bool:
@@ -108,6 +112,10 @@ class IoTAdapterMixin:
         if self._message_handler is None:
             raise RuntimeError("Hermes message handler is not attached")
 
+        media_response = await self._handle_media_transport_turn(session, str(turn.text or ""))
+        if media_response is not None:
+            return media_response
+
         from gateway.platforms.base import MessageEvent, MessageType
         from gateway.session import SessionSource
 
@@ -135,6 +143,27 @@ class IoTAdapterMixin:
         )
         self._auto_tts_disabled_chats.add(session.device_id)
         return await self._message_handler(event)
+
+    async def _handle_media_transport_turn(self, session: DeviceSession, text: str) -> str | None:
+        if self._runtime is None or not session.device_state.get("media_playing"):
+            return None
+
+        normalized = text.strip().lower()
+        if not normalized:
+            return None
+
+        if _MEDIA_NEXT_PATTERN.search(normalized):
+            await self._runtime.spotify.next()
+            return "Skipping."
+
+        if _MEDIA_PAUSE_PATTERN.search(normalized):
+            try:
+                await self._runtime.spotify.pause()
+            finally:
+                await self._runtime.librespot.stop()
+            return "Stopped."
+
+        return None
 
     async def _device_session(self, chat_id: str) -> DeviceSession | None:
         if self._runtime is None:

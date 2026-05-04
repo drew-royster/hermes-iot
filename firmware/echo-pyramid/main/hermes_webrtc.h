@@ -8,6 +8,7 @@
 
 esp_err_t hermes_webrtc_start(const GatewayBootstrapInfo *bootstrap);
 void hermes_webrtc_request_connection(void);
+void hermes_webrtc_toggle_wake_sleep(void);
 bool hermes_webrtc_connection_requested(void);
 void hermes_webrtc_loop(void);
 bool hermes_webrtc_connected(void);

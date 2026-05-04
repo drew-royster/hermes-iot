@@ -332,9 +332,17 @@ void apply_assistant_state(const char *state) {
 
   const bool state_changed = remember_assistant_state(state);
 
+  if (s_media_mode && s_local_wake_active && strcmp(state, "idle") == 0) {
+    s_local_wake_active = false;
+    hermes_media_set_playback_enabled(true);
+    board_status_set_state(STATUS_MEDIA_PLAYING, "Playing");
+    return;
+  }
+
   if (s_media_mode &&
       !s_local_wake_active &&
       (strcmp(state, "idle") == 0 || strcmp(state, "listening") == 0)) {
+    hermes_media_set_playback_enabled(true);
     board_status_set_state(STATUS_MEDIA_PLAYING, "Playing");
     return;
   }
@@ -781,6 +789,10 @@ void hermes_webrtc_request_connection(void) {
   if (s_peer_connection != nullptr && s_connected) {
     ESP_LOGI(LOG_TAG, "Wake requested on active WebRTC session");
     s_local_wake_active = true;
+    if (s_media_mode) {
+      hermes_media_set_playback_enabled(false);
+      ESP_LOGI(LOG_TAG, "Media barge-in wake; local playback muted");
+    }
     hermes_media_set_publish_enabled(true);
     note_session_activity();
     board_status_set_state(STATUS_LISTENING, "Listening");
@@ -802,6 +814,27 @@ void hermes_webrtc_request_connection(void) {
   note_session_activity();
   board_status_set_state(STATUS_SIGNALING, "Waking");
   board_status_show_text("WAKE");
+}
+
+void hermes_webrtc_toggle_wake_sleep(void) {
+  if (s_peer_connection == nullptr && !s_connection_requested) {
+    hermes_webrtc_request_connection();
+    return;
+  }
+
+  ESP_LOGI(LOG_TAG, "Atom button requested sleep; closing WebRTC session");
+  s_local_wake_active = false;
+  s_media_mode = false;
+  s_connection_requested = false;
+  hermes_media_set_publish_enabled(false);
+  hermes_media_set_playback_enabled(true);
+  board_status_set_state(STATUS_CONNECTED_IDLE, "Say hey willow");
+  board_status_show_text("SLEEP");
+  if (s_peer_connection != nullptr) {
+    peer_connection_close(s_peer_connection);
+    s_connection_closed = true;
+    s_connected = false;
+  }
 }
 
 bool hermes_webrtc_connection_requested(void) {

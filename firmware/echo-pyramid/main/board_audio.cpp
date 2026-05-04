@@ -97,7 +97,6 @@ uint8_t s_custom_red = 0;
 uint8_t s_custom_green = 0;
 uint8_t s_custom_blue = 0;
 char s_custom_pattern[16] = "solid";
-bool s_talk_enabled = true;
 int s_last_user_button_level = 1;
 TickType_t s_last_user_button_toggle = 0;
 
@@ -1862,11 +1861,9 @@ bool board_controls_poll(void) {
   const int user_button_level = gpio_get_level(kEchoPyramidBoardConfig.user_button);
   if (s_last_user_button_level == 1 && user_button_level == 0 &&
       (now - s_last_user_button_toggle) > pdMS_TO_TICKS(250)) {
-    s_talk_enabled = !s_talk_enabled;
     s_last_user_button_toggle = now;
-    hermes_media_set_publish_enabled(s_talk_enabled);
-    board_status_set_talk_enabled(s_talk_enabled);
-    ESP_LOGI(TAG, "Talk publishing %s", s_talk_enabled ? "enabled" : "muted");
+    ESP_LOGI(TAG, "Atom button wake/sleep toggle");
+    hermes_webrtc_toggle_wake_sleep();
   }
   s_last_user_button_level = user_button_level;
 
@@ -1888,12 +1885,6 @@ bool board_controls_poll(void) {
   } else if (s_swipe_first_touch != 0 &&
              static_cast<int32_t>(now - s_swipe_deadline) > 0) {
     s_swipe_first_touch = 0;
-  }
-
-  if ((new_presses & 0x01) && s_swipe_first_touch == 0) {
-    board_status_set_state(STATUS_LISTENING, "Touch");
-    board_audio_play_wake_tone();
-    return true;
   }
 
   if (s_swipe_first_touch == 0) {
