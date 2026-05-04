@@ -1857,7 +1857,7 @@ esp_err_t board_audio_play_beep(uint32_t frequency_hz, uint32_t duration_ms) {
   return play_tone(static_cast<float>(frequency_hz), duration_ms);
 }
 
-void board_controls_poll(void) {
+bool board_controls_poll(void) {
   const TickType_t now = xTaskGetTickCount();
   const int user_button_level = gpio_get_level(kEchoPyramidBoardConfig.user_button);
   if (s_last_user_button_level == 1 && user_button_level == 0 &&
@@ -1871,12 +1871,12 @@ void board_controls_poll(void) {
   s_last_user_button_level = user_button_level;
 
   if (s_touch_dev == nullptr) {
-    return;
+    return false;
   }
 
   uint8_t touch_state = 0;
   if (read_touch_state(&touch_state) != ESP_OK) {
-    return;
+    return false;
   }
 
   const uint8_t new_presses =
@@ -1893,6 +1893,7 @@ void board_controls_poll(void) {
   if ((new_presses & 0x01) && s_swipe_first_touch == 0) {
     board_status_set_state(STATUS_LISTENING, "Touch");
     board_audio_play_wake_tone();
+    return true;
   }
 
   if (s_swipe_first_touch == 0) {
@@ -1909,7 +1910,7 @@ void board_controls_poll(void) {
       s_swipe_first_touch = 2;
       s_swipe_deadline = now + kSwipeTimeoutTicks;
     }
-    return;
+    return false;
   }
 
   uint8_t next_volume = s_speaker_volume_percent;
@@ -1943,6 +1944,8 @@ void board_controls_poll(void) {
     board_status_show_volume(next_volume);
     hermes_webrtc_send_volume(next_volume);
   }
+
+  return false;
 }
 
 void board_dance_mode_set(bool enabled) {

@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import audioop
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -102,8 +103,17 @@ class DeepgramFluxSpeechToTextProvider:
 
         async with connect(url, additional_headers=headers, max_size=None) as websocket:
             logger.info("Connected Flux for %s", session.device_id)
+            debug_capture = os.environ.get("HERMES_IOT_DEBUG_CAPTURE_PCM", "").lower() in {"1", "true", "yes"}
+            debug_capture_file = None
+            debug_capture_bytes = 0
+            debug_capture_limit = self._config.sample_rate * 2 * 20
+            if debug_capture:
+                path = f"/tmp/hermes_iot_flux_{session.device_id}_{int(time.time())}.pcm"
+                debug_capture_file = open(path, "wb")
+                logger.info("Capturing Flux PCM for %s to %s", session.device_id, path)
 
             async def send_audio() -> None:
+                nonlocal debug_capture_bytes
                 frame_count = 0
                 pcm_peak = 0
                 pcm_rms_sum = 0
@@ -132,6 +142,14 @@ class DeepgramFluxSpeechToTextProvider:
                             pcm_peak = max(pcm_peak, audioop.max(pcm, 2))
                             pcm_rms_sum += audioop.rms(pcm, 2)
                             pcm_rms_count += 1
+                            if (
+                                debug_capture_file is not None
+                                and debug_capture_bytes < debug_capture_limit
+                            ):
+                                remaining = debug_capture_limit - debug_capture_bytes
+                                chunk = pcm[:remaining]
+                                debug_capture_file.write(chunk)
+                                debug_capture_bytes += len(chunk)
                         if frame_count % 50 == 0:
                             avg_rms = (
                                 pcm_rms_sum // pcm_rms_count
@@ -166,6 +184,7 @@ class DeepgramFluxSpeechToTextProvider:
                         await websocket.send(pcm)
 
             async def receive_events() -> None:
+                empty_update_count = 0
                 while True:
                     message = await websocket.recv()
                     if isinstance(message, bytes):
@@ -174,6 +193,27 @@ class DeepgramFluxSpeechToTextProvider:
                     event = payload.get("event") or payload.get("type")
                     transcript = payload.get("transcript", "").strip()
                     now = time.monotonic()
+
+                    if transcript or event in {"StartOfTurn", "EndOfTurn", "EagerEndOfTurn"}:
+                        logger.info(
+                            "Flux event for %s: type=%s event=%s chars=%s text=%s",
+                            session.device_id,
+                            payload.get("type"),
+                            payload.get("event"),
+                            len(transcript),
+                            transcript,
+                        )
+                    elif event == "Update":
+                        empty_update_count += 1
+                        if empty_update_count <= 5 or empty_update_count % 25 == 0:
+                            logger.info(
+                                "Flux empty update for %s: count=%s confidence=%s window=%s-%s",
+                                session.device_id,
+                                empty_update_count,
+                                payload.get("end_of_turn_confidence"),
+                                payload.get("audio_window_start"),
+                                payload.get("audio_window_end"),
+                            )
 
                     if event in {"StartOfTurn", "TurnResumed"}:
                         session.device_state["_latency_turn"] = {
@@ -266,6 +306,13 @@ class DeepgramFluxSpeechToTextProvider:
                 await asyncio.gather(sender, receiver)
             finally:
                 logger.info("Flux session closed for %s", session.device_id)
+                if debug_capture_file is not None:
+                    debug_capture_file.close()
+                    logger.info(
+                        "Captured Flux PCM for %s: bytes=%s",
+                        session.device_id,
+                        debug_capture_bytes,
+                    )
                 sender.cancel()
                 receiver.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

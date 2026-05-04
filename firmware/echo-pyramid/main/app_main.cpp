@@ -159,7 +159,9 @@ extern "C" void app_main(void) {
       }
     }
     hermes_webrtc_loop();
-    board_controls_poll();
+    if (board_controls_poll()) {
+      hermes_webrtc_request_connection();
+    }
     board_lights_tick();
     board_status_tick();
     board_timer_tick();

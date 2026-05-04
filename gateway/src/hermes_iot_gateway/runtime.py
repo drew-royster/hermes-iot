@@ -88,6 +88,11 @@ def create_runtime(
             )
         )
     else:
+        if resolved.speech_to_text_provider == "deepgram":
+            logger.warning(
+                "Deepgram STT selected but DEEPGRAM_API_KEY is missing; "
+                "falling back to debug STT, which does not transcribe device audio"
+            )
         stt_provider = DebugSpeechToTextProvider()
 
     if resolved.text_to_speech_provider == "deepgram" and resolved.deepgram_api_key:
@@ -156,6 +161,11 @@ def create_native_runtime(
             )
         )
     else:
+        if resolved.speech_to_text_provider == "deepgram":
+            logger.warning(
+                "Deepgram STT selected but DEEPGRAM_API_KEY is missing; "
+                "falling back to debug STT, which does not transcribe device audio"
+            )
         stt_provider = DebugSpeechToTextProvider()
 
     if resolved.text_to_speech_provider == "deepgram" and resolved.deepgram_api_key:

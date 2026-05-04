@@ -410,16 +410,21 @@ void hermes_media_send_audio(PeerConnection *peer_connection) {
     return;
   }
 
-  if (board_audio_read(s_read_buffer, kCaptureFrameBytes) != ESP_OK) {
-    ESP_LOGE(LOG_TAG, "board_audio_read failed");
+  const bool remote_playback_active =
+      xTaskGetTickCount() < s_remote_playback_active_until;
+  const esp_err_t read_result =
+      remote_playback_active
+          ? board_audio_read(s_read_buffer, kCaptureFrameBytes)
+          : board_audio_read_raw(s_read_buffer, kCaptureFrameBytes);
+  if (read_result != ESP_OK) {
+    ESP_LOGE(LOG_TAG, "board_audio_read failed: %s",
+             esp_err_to_name(read_result));
     return;
   }
 
   const int32_t input_peak = peak_for_frame(s_read_buffer, kCaptureFrameSamples);
   BoardAudioStats board_stats = {};
   board_audio_get_stats(&board_stats);
-  const bool remote_playback_active =
-      xTaskGetTickCount() < s_remote_playback_active_until;
   const int32_t gain_q8 =
       apply_capture_agc(s_read_buffer, kCaptureFrameSamples, input_peak,
                         board_stats.mic_peak,

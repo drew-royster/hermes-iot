@@ -108,7 +108,7 @@ esp_err_t board_audio_play_ready_tone(void);
 esp_err_t board_audio_play_failure_tone(void);
 esp_err_t board_audio_play_timer_done_tone(void);
 esp_err_t board_audio_play_beep(uint32_t frequency_hz, uint32_t duration_ms);
-void board_controls_poll(void);
+bool board_controls_poll(void);
 void board_lights_set_state(StatusState state);
 void board_lights_set_effect(const char *color, const char *pattern);
 void board_lights_tick(void);

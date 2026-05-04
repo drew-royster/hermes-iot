@@ -37,7 +37,7 @@ void wake_word_task(void *) {
       continue;
     }
 
-    if (board_audio_read(s_audio_buffer, s_audio_buffer_bytes) != ESP_OK) {
+    if (board_audio_read_raw(s_audio_buffer, s_audio_buffer_bytes) != ESP_OK) {
       ESP_LOGW(TAG, "Wake word mic read failed");
       vTaskDelay(kWakeWordIdlePollTicks);
       continue;
