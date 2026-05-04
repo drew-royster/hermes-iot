@@ -501,7 +501,10 @@ static const char* peer_connection_create_sdp(PeerConnection* pc, SdpType sdp_ty
   }
 
   dtls_srtp_reset_session(&pc->dtls_srtp);
-  dtls_srtp_init(&pc->dtls_srtp, role, pc);
+  if (dtls_srtp_init(&pc->dtls_srtp, role, pc) != 0) {
+    LOGE("dtls_srtp_init failed");
+    return NULL;
+  }
   pc->dtls_srtp.udp_recv = peer_connection_dtls_srtp_recv;
   pc->dtls_srtp.udp_send = peer_connection_dtls_srtp_send;
 

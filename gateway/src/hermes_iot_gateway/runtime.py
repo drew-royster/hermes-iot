@@ -20,6 +20,7 @@ from .deepgram import (
 from .hermes import HermesResponsesClient
 from .models import (
     DebugPlaybackRequest,
+    DebugTextRequest,
     DeviceCommandRequest,
     DeviceSummary,
     IceCandidateRequest,
@@ -344,6 +345,13 @@ def create_app(runtime: GatewayRuntime | None = None) -> FastAPI:
             result = await resolved_runtime.sessions.debug_playback(device_id, request)
         except RuntimeError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if not result.get("accepted"):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result)
+        return result
+
+    @app.post("/debug/devices/{device_id}/text", dependencies=[Depends(require_admin)])
+    async def debug_text(device_id: str, request: DebugTextRequest) -> dict[str, object]:
+        result = await resolved_runtime.sessions.debug_text_turn(device_id, request.text, request.hello)
         if not result.get("accepted"):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result)
         return result

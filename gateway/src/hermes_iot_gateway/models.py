@@ -85,6 +85,11 @@ class DebugPlaybackRequest(BaseModel):
     sample_rate_hz: int = 16000
 
 
+class DebugTextRequest(BaseModel):
+    text: str
+    hello: dict[str, Any] | None = None
+
+
 class SpotifyPlayRequest(BaseModel):
     query: str | None = None
     uri: str | None = None

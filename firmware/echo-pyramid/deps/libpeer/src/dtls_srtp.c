@@ -146,6 +146,7 @@ static void dtls_srtp_debug(void* ctx, int level, const char* file, int line, co
 #endif
 
 int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
+  int ret;
   static const mbedtls_ssl_srtp_profile default_profiles[] = {
       MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_80,
       MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_32,
@@ -170,7 +171,28 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
   mbedtls_debug_set_threshold(3);
   mbedtls_ssl_conf_dbg(&dtls_srtp->conf, dtls_srtp_debug, NULL);
 #endif
-  dtls_srtp_selfsign_cert(dtls_srtp);
+  if (dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
+    ret = mbedtls_ssl_config_defaults(&dtls_srtp->conf,
+                                      MBEDTLS_SSL_IS_SERVER,
+                                      MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+                                      MBEDTLS_SSL_PRESET_DEFAULT);
+  } else {
+    ret = mbedtls_ssl_config_defaults(&dtls_srtp->conf,
+                                      MBEDTLS_SSL_IS_CLIENT,
+                                      MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+                                      MBEDTLS_SSL_PRESET_DEFAULT);
+  }
+
+  if (ret != 0) {
+    LOGE("mbedtls_ssl_config_defaults failed -0x%.4x", (unsigned int)-ret);
+    return ret;
+  }
+
+  ret = dtls_srtp_selfsign_cert(dtls_srtp);
+  if (ret < 0) {
+    LOGE("dtls_srtp_selfsign_cert failed -0x%.4x", (unsigned int)-ret);
+    return ret;
+  }
 
   mbedtls_ssl_conf_verify(&dtls_srtp->conf, dtls_srtp_cert_verify, NULL);
 
@@ -178,29 +200,27 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
 
   mbedtls_ssl_conf_ca_chain(&dtls_srtp->conf, &dtls_srtp->cert, NULL);
 
-  mbedtls_ssl_conf_own_cert(&dtls_srtp->conf, &dtls_srtp->cert, &dtls_srtp->pkey);
+  ret = mbedtls_ssl_conf_own_cert(&dtls_srtp->conf, &dtls_srtp->cert, &dtls_srtp->pkey);
+  if (ret != 0) {
+    LOGE("mbedtls_ssl_conf_own_cert failed -0x%.4x", (unsigned int)-ret);
+    return ret;
+  }
 
   mbedtls_ssl_conf_rng(&dtls_srtp->conf, mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
 
   mbedtls_ssl_conf_read_timeout(&dtls_srtp->conf, 1000);
 
   if (dtls_srtp->role == DTLS_SRTP_ROLE_SERVER) {
-    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
-                                MBEDTLS_SSL_IS_SERVER,
-                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-                                MBEDTLS_SSL_PRESET_DEFAULT);
 
     mbedtls_ssl_cookie_init(&dtls_srtp->cookie_ctx);
 
-    mbedtls_ssl_cookie_setup(&dtls_srtp->cookie_ctx, mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
+    ret = mbedtls_ssl_cookie_setup(&dtls_srtp->cookie_ctx, mbedtls_ctr_drbg_random, &dtls_srtp->ctr_drbg);
+    if (ret != 0) {
+      LOGE("mbedtls_ssl_cookie_setup failed -0x%.4x", (unsigned int)-ret);
+      return ret;
+    }
 
     mbedtls_ssl_conf_dtls_cookies(&dtls_srtp->conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check, &dtls_srtp->cookie_ctx);
-
-  } else {
-    mbedtls_ssl_config_defaults(&dtls_srtp->conf,
-                                MBEDTLS_SSL_IS_CLIENT,
-                                MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-                                MBEDTLS_SSL_PRESET_DEFAULT);
   }
 
   dtls_srtp_x509_digest(&dtls_srtp->cert, dtls_srtp->local_fingerprint);
@@ -213,7 +233,11 @@ int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data) {
 
   mbedtls_ssl_conf_cert_req_ca_list(&dtls_srtp->conf, MBEDTLS_SSL_CERT_REQ_CA_LIST_DISABLED);
 
-  mbedtls_ssl_setup(&dtls_srtp->ssl, &dtls_srtp->conf);
+  ret = mbedtls_ssl_setup(&dtls_srtp->ssl, &dtls_srtp->conf);
+  if (ret != 0) {
+    LOGE("mbedtls_ssl_setup failed -0x%.4x", (unsigned int)-ret);
+    return ret;
+  }
 
   return 0;
 }

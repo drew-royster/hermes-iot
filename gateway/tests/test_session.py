@@ -138,6 +138,49 @@ def test_session_manager_emits_expected_state_sequence() -> None:
     asyncio.run(_session_state_roundtrip())
 
 
+async def _debug_text_turn_uses_connected_session() -> None:
+    registry = InMemoryRegistry()
+    await registry.claim_device(
+        device_id="echo-debug-http",
+        firmware_version="0.0.1",
+        capabilities=["mic", "speaker"],
+    )
+    speech = _FakeSpeech()
+    hermes = _FakeHermes()
+    manager = GatewaySessionManager(registry, hermes, speech)
+    session = await manager.create_session("echo-debug-http")
+
+    sent_messages: list[dict] = []
+
+    async def _sender(payload: dict) -> None:
+        sent_messages.append(payload)
+
+    await manager.bind_sender(session.session_id, _sender)
+    result = await manager.debug_text_turn(
+        "echo-debug-http",
+        "hello from admin debug",
+        {"source": "test"},
+    )
+    assert result["accepted"] is True
+    assert result["session_id"] == session.session_id
+    assert session.active_turn is not None
+    await session.active_turn
+
+    assert hermes.calls[0]["text"] == "hello from admin debug"
+    assert hermes.calls[0]["conversation"] == "iot:echo-debug-http"
+    assert [msg["payload"]["state"] for msg in sent_messages if msg["type"] == "assistant.state"] == [
+        "thinking",
+        "tool",
+        "speaking",
+        "idle",
+        "listening",
+    ]
+
+
+def test_debug_text_turn_uses_connected_session() -> None:
+    asyncio.run(_debug_text_turn_uses_connected_session())
+
+
 async def _session_hello_without_media_starts_listening() -> None:
     registry = InMemoryRegistry()
     await registry.claim_device(

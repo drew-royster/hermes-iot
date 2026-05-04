@@ -242,6 +242,21 @@ class GatewaySessionManager:
         await self._send(session, DataChannelMessage(type="device.command", payload={"type": request.type, **request.payload}))
         return True
 
+    async def debug_text_turn(self, device_id: str, text: str, hello_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        session = await self._registry.get_session_for_device(device_id)
+        if not session or not session.connected:
+            return {"accepted": False, "reason": "device is not connected"}
+        turn = await self._speech.transcribe_text_payload(text)
+        if turn is None:
+            return {"accepted": False, "reason": "empty text"}
+        await self._submit_turn(session, turn, hello_metadata)
+        return {
+            "accepted": True,
+            "device_id": device_id,
+            "session_id": session.session_id,
+            "conversation": session.conversation,
+        }
+
     async def debug_playback(self, device_id: str, request: DebugPlaybackRequest) -> dict[str, Any]:
         session = await self._registry.get_session_for_device(device_id)
         if not session or not session.connected or session.output_track is None:
