@@ -161,6 +161,11 @@ class IoTAdapterMixin:
                 await self._runtime.spotify.pause()
             finally:
                 await self._runtime.librespot.stop()
+                session.device_state["media_playing"] = False
+                await self._runtime.sessions._send(
+                    session,
+                    DataChannelMessage(type="device.command", payload={"type": "media.mode", "playing": False}),
+                )
             return "Stopped."
 
         return None

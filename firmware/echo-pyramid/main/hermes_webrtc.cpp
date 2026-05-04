@@ -470,6 +470,7 @@ void handle_device_command(const cJSON *payload) {
       s_local_wake_active = false;
       ESP_LOGI(LOG_TAG, "Media mode disabled; mic publishing enabled");
       hermes_media_set_publish_enabled(true);
+      hermes_media_set_playback_enabled(true);
       board_status_set_state(STATUS_CONNECTED_IDLE, "Connected");
     }
   } else if (strcmp(command_type->valuestring, "end_conversation") == 0) {

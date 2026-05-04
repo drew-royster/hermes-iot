@@ -37,10 +37,19 @@ class _FakeLibrespot:
         return {"running": False}
 
 
+class _FakeSessions:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def _send(self, session, message) -> None:
+        self.sent.append(message.model_dump(mode="json"))
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.spotify = _FakeSpotify()
         self.librespot = _FakeLibrespot()
+        self.sessions = _FakeSessions()
 
 
 async def _media_stop_phrase_short_circuits_agent() -> None:
@@ -59,6 +68,9 @@ async def _media_stop_phrase_short_circuits_agent() -> None:
     assert response == "Stopped."
     assert runtime.spotify.paused == 1
     assert runtime.librespot.stopped == 1
+    assert session.device_state["media_playing"] is False
+    assert runtime.sessions.sent[0]["type"] == "device.command"
+    assert runtime.sessions.sent[0]["payload"] == {"type": "media.mode", "playing": False}
 
 
 def test_media_stop_phrase_short_circuits_agent() -> None:
