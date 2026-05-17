@@ -20,16 +20,18 @@ namespace {
 
 constexpr int kPlaybackSampleRate = 48000;
 constexpr int kCaptureSampleRate = 16000;
+constexpr size_t kCaptureChannels = 2;
 constexpr int kOpusBufferSize = 1276;
 constexpr size_t kPlaybackFrameSamples = kPlaybackSampleRate / 50;
 constexpr size_t kPlaybackFrameBytes = kPlaybackFrameSamples * sizeof(opus_int16);
 constexpr size_t kCaptureFrameSamples = kCaptureSampleRate / 50;
-constexpr size_t kCaptureFrameBytes = kCaptureFrameSamples * sizeof(opus_int16);
+constexpr size_t kCaptureFrameBytes =
+    kCaptureFrameSamples * kCaptureChannels * sizeof(opus_int16);
 constexpr size_t kPcmMaxDecodeSamples = (kPlaybackSampleRate * 60) / 1000;
 constexpr size_t kPlaybackPrebufferFrames = 10;
 constexpr size_t kPlaybackQueueFrames = 48;
 constexpr uint32_t kPlaybackResetUnderrunFrames = 15;
-constexpr int kOpusEncoderBitrate = 30000;
+constexpr int kOpusEncoderBitrate = 64000;
 constexpr int kOpusEncoderComplexity = 0;
 constexpr int16_t kRemoteAudioActivityPeak = 32;
 constexpr int32_t kCaptureAgcTargetPeak = 5000;
@@ -72,10 +74,11 @@ int32_t sample_abs(int16_t sample) {
   return value < 0 ? -value : value;
 }
 
-int32_t peak_for_frame(const int16_t *samples, size_t sample_count) {
+int32_t peak_for_interleaved_channel(const int16_t *samples, size_t frame_count,
+                                     size_t channels, size_t channel) {
   int32_t peak = 0;
-  for (size_t i = 0; i < sample_count; ++i) {
-    peak = std::max(peak, sample_abs(samples[i]));
+  for (size_t i = 0; i < frame_count; ++i) {
+    peak = std::max(peak, sample_abs(samples[(i * channels) + channel]));
   }
   return peak;
 }
@@ -92,9 +95,8 @@ int16_t scale_sample_q8(int16_t sample, int32_t gain_q8) {
   return static_cast<int16_t>(scaled);
 }
 
-int32_t apply_capture_agc(int16_t *samples, size_t sample_count,
-                          int32_t input_peak, int32_t raw_mic_peak,
-                          bool remote_playback_active) {
+int32_t calculate_capture_gain_q8(int32_t input_peak, int32_t raw_mic_peak,
+                                  bool remote_playback_active) {
   const int32_t target_peak = remote_playback_active
                                   ? kCaptureAgcPlaybackTargetPeak
                                   : kCaptureAgcTargetPeak;
@@ -111,15 +113,17 @@ int32_t apply_capture_agc(int16_t *samples, size_t sample_count,
     gain_q8 =
         std::min(max_gain_q8, (target_peak * kCaptureAgcUnityQ8) / input_peak);
   }
+  return gain_q8;
+}
 
+void apply_capture_gain(int16_t *samples, size_t sample_count, int32_t gain_q8) {
   if (gain_q8 == kCaptureAgcUnityQ8) {
-    return gain_q8;
+    return;
   }
 
   for (size_t i = 0; i < sample_count; ++i) {
     samples[i] = scale_sample_q8(samples[i], gain_q8);
   }
-  return gain_q8;
 }
 
 int play_audio(const void *data, size_t size) {
@@ -266,14 +270,15 @@ void hermes_media_prepare_encoder(void) {
 
   int encoder_error = 0;
   s_opus_encoder =
-      opus_encoder_create(kCaptureSampleRate, 1, OPUS_APPLICATION_VOIP, &encoder_error);
+      opus_encoder_create(kCaptureSampleRate, kCaptureChannels,
+                          OPUS_APPLICATION_VOIP, &encoder_error);
   if (encoder_error != OPUS_OK || s_opus_encoder == nullptr) {
     ESP_LOGE(LOG_TAG, "opus_encoder_create failed: %d", encoder_error);
     return;
   }
 
-  if (opus_encoder_init(s_opus_encoder, kCaptureSampleRate, 1, OPUS_APPLICATION_VOIP) !=
-      OPUS_OK) {
+  if (opus_encoder_init(s_opus_encoder, kCaptureSampleRate, kCaptureChannels,
+                        OPUS_APPLICATION_VOIP) != OPUS_OK) {
     ESP_LOGE(LOG_TAG, "opus_encoder_init failed");
     return;
   }
@@ -413,23 +418,25 @@ void hermes_media_send_audio(PeerConnection *peer_connection) {
   const bool remote_playback_active =
       xTaskGetTickCount() < s_remote_playback_active_until;
   const esp_err_t read_result =
-      remote_playback_active
-          ? board_audio_read(s_read_buffer, kCaptureFrameBytes)
-          : board_audio_read_raw(s_read_buffer, kCaptureFrameBytes);
+      board_audio_read_raw_pair(s_read_buffer, kCaptureFrameBytes);
   if (read_result != ESP_OK) {
-    ESP_LOGE(LOG_TAG, "board_audio_read failed: %s",
+    ESP_LOGE(LOG_TAG, "board_audio_read_raw_pair failed: %s",
              esp_err_to_name(read_result));
     return;
   }
 
-  const int32_t input_peak = peak_for_frame(s_read_buffer, kCaptureFrameSamples);
+  const int32_t input_peak =
+      peak_for_interleaved_channel(s_read_buffer, kCaptureFrameSamples,
+                                   kCaptureChannels, 0);
   BoardAudioStats board_stats = {};
   board_audio_get_stats(&board_stats);
-  const int32_t gain_q8 =
-      apply_capture_agc(s_read_buffer, kCaptureFrameSamples, input_peak,
-                        board_stats.mic_peak,
-                        remote_playback_active);
-  const int32_t output_peak = peak_for_frame(s_read_buffer, kCaptureFrameSamples);
+  const int32_t gain_q8 = calculate_capture_gain_q8(
+      input_peak, board_stats.mic_peak, remote_playback_active);
+  apply_capture_gain(s_read_buffer, kCaptureFrameSamples * kCaptureChannels,
+                     gain_q8);
+  const int32_t output_peak =
+      peak_for_interleaved_channel(s_read_buffer, kCaptureFrameSamples,
+                                   kCaptureChannels, 0);
   s_encoder_input_peak = input_peak;
   s_encoder_peak = output_peak;
   s_capture_gain_q8 = gain_q8;

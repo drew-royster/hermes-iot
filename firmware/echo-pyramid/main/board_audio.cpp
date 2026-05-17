@@ -1099,6 +1099,14 @@ int16_t downsample_capture_slot(size_t voice_index, size_t channel) {
   return static_cast<int16_t>(sum / static_cast<int32_t>(kVoiceDownsampleRatio));
 }
 
+void copy_raw_mic_ref_channels(int16_t *dest, size_t mono_sample_count) {
+  for (size_t i = 0; i < mono_sample_count; ++i) {
+    dest[i * 2] = downsample_capture_slot(i, kAecMicSlot);
+    dest[(i * 2) + 1] = downsample_capture_slot(i, kAecRefSlot);
+  }
+  s_last_aec_peak = 0;
+}
+
 esp_err_t read_raw_mic(int16_t *dest, size_t mono_sample_count) {
   ESP_RETURN_ON_ERROR(read_stereo_capture(mono_sample_count), TAG,
                       "Failed to read stereo mic capture");
@@ -1359,6 +1367,34 @@ esp_err_t board_audio_read_raw(void *dest, size_t size) {
   if ((s_mic_read_count % 250) == 0) {
     ESP_LOGI(TAG,
              "Mic peaks raw=%ld ref=%ld aec=%ld enabled=%d source=raw slots=[%ld,%ld,%ld,%ld]",
+             static_cast<long>(s_last_mic_peak),
+             static_cast<long>(s_last_ref_peak),
+             static_cast<long>(s_last_aec_peak),
+             s_aec_handle != nullptr,
+             static_cast<long>(s_last_slot_peaks[0]),
+             static_cast<long>(s_last_slot_peaks[1]),
+             static_cast<long>(s_last_slot_peaks[2]),
+             static_cast<long>(s_last_slot_peaks[3]));
+  }
+  return ESP_OK;
+}
+
+esp_err_t board_audio_read_raw_pair(void *dest, size_t size) {
+  if (!s_audio_initialized || s_mic_dev == nullptr) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (dest == nullptr || (size % (sizeof(int16_t) * 2)) != 0) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  const size_t mono_sample_count = size / (sizeof(int16_t) * 2);
+  ESP_RETURN_ON_ERROR(read_stereo_capture(mono_sample_count), TAG,
+                      "Failed to read raw mic/reference channels");
+  copy_raw_mic_ref_channels(static_cast<int16_t *>(dest), mono_sample_count);
+  ++s_mic_read_count;
+  if ((s_mic_read_count % 250) == 0) {
+    ESP_LOGI(TAG,
+             "Mic peaks raw=%ld ref=%ld aec=%ld enabled=%d source=raw_pair slots=[%ld,%ld,%ld,%ld]",
              static_cast<long>(s_last_mic_peak),
              static_cast<long>(s_last_ref_peak),
              static_cast<long>(s_last_aec_peak),

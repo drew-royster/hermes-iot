@@ -24,6 +24,30 @@ def _format_ms(seconds: float) -> str:
     return f"{seconds * 1000:.0f}ms"
 
 
+def _extract_mic_reference_pcm(frame: Any) -> tuple[bytes, bytes | None]:
+    channel_count = len(getattr(frame.layout, "channels", ()))
+    pcm = bytes(frame.planes[0])
+    if channel_count <= 1:
+        return pcm, None
+
+    sample_width = 2
+    frame_width = channel_count * sample_width
+    usable_length = len(pcm) - (len(pcm) % frame_width)
+    mic = bytearray(usable_length // channel_count)
+    reference = bytearray(usable_length // channel_count)
+    mic_offset = 0
+    reference_offset = 0
+    for offset in range(0, usable_length, frame_width):
+        mic[mic_offset : mic_offset + sample_width] = pcm[offset : offset + sample_width]
+        reference_start = offset + sample_width
+        reference[reference_offset : reference_offset + sample_width] = pcm[
+            reference_start : reference_start + sample_width
+        ]
+        mic_offset += sample_width
+        reference_offset += sample_width
+    return bytes(mic), bytes(reference)
+
+
 TurnCallback = Callable[[DeviceSession, SpeechTurn], Awaitable[None]]
 InterruptCallback = Callable[[DeviceSession, str], Awaitable[None]]
 EmitCallback = Callable[[DeviceSession, DataChannelMessage], Awaitable[None]]
@@ -99,7 +123,8 @@ class DeepgramFluxSpeechToTextProvider:
             url += f"&eager_eot_threshold={self._config.eager_eot_threshold}"
 
         headers = {"Authorization": f"Token {self._config.api_key}"}
-        resampler = AudioResampler(format="s16", layout="mono", rate=self._config.sample_rate)
+        mono_resampler = AudioResampler(format="s16", layout="mono", rate=self._config.sample_rate)
+        stereo_resampler = AudioResampler(format="s16", layout="stereo", rate=self._config.sample_rate)
 
         async with connect(url, additional_headers=headers, max_size=None) as websocket:
             logger.info("Connected Flux for %s", session.device_id)
@@ -116,6 +141,7 @@ class DeepgramFluxSpeechToTextProvider:
                 nonlocal debug_capture_bytes
                 frame_count = 0
                 pcm_peak = 0
+                reference_peak = 0
                 pcm_rms_sum = 0
                 pcm_rms_count = 0
                 while True:
@@ -129,6 +155,8 @@ class DeepgramFluxSpeechToTextProvider:
                             getattr(frame, "sample_rate", "unknown"),
                             getattr(frame, "samples", "unknown"),
                         )
+                    input_channels = len(getattr(frame.layout, "channels", ()))
+                    resampler = stereo_resampler if input_channels > 1 else mono_resampler
                     resampled_frames = resampler.resample(frame)
                     if not isinstance(resampled_frames, list):
                         resampled_frames = [resampled_frames]
@@ -137,11 +165,13 @@ class DeepgramFluxSpeechToTextProvider:
                     for pcm_frame in resampled_frames:
                         if pcm_frame is None:
                             continue
-                        pcm = bytes(pcm_frame.planes[0])
+                        pcm, reference_pcm = _extract_mic_reference_pcm(pcm_frame)
                         if pcm:
                             pcm_peak = max(pcm_peak, audioop.max(pcm, 2))
                             pcm_rms_sum += audioop.rms(pcm, 2)
                             pcm_rms_count += 1
+                            if reference_pcm:
+                                reference_peak = max(reference_peak, audioop.max(reference_pcm, 2))
                             if (
                                 debug_capture_file is not None
                                 and debug_capture_bytes < debug_capture_limit
@@ -157,10 +187,11 @@ class DeepgramFluxSpeechToTextProvider:
                                 else 0
                             )
                             logger.info(
-                                "Flux PCM level for %s: frames=%s peak=%s rms=%s capturing=%s state=%s",
+                                "Flux PCM level for %s: frames=%s peak=%s ref_peak=%s rms=%s capturing=%s state=%s",
                                 session.device_id,
                                 frame_count,
                                 pcm_peak,
+                                reference_peak,
                                 avg_rms,
                                 session.capturing_audio,
                                 session.assistant_state,
@@ -172,6 +203,7 @@ class DeepgramFluxSpeechToTextProvider:
                                     payload={
                                         "frames_seen": frame_count,
                                         "pcm_peak": pcm_peak,
+                                        "reference_peak": reference_peak,
                                         "pcm_rms": avg_rms,
                                         "capturing_audio": session.capturing_audio,
                                         "state": session.assistant_state,
@@ -179,6 +211,7 @@ class DeepgramFluxSpeechToTextProvider:
                                 ),
                             )
                             pcm_peak = 0
+                            reference_peak = 0
                             pcm_rms_sum = 0
                             pcm_rms_count = 0
                         await websocket.send(pcm)

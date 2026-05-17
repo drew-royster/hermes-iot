@@ -1,8 +1,32 @@
 import asyncio
 
+import numpy as np
+from av import AudioFrame
+from hermes_iot_gateway.deepgram import _extract_mic_reference_pcm
 from hermes_iot_gateway.audio import PCMQueueAudioTrack
 from hermes_iot_gateway.registry import DeviceSession
 from hermes_iot_gateway.speech import NoOpTextToSpeechProvider, SpeechRuntime
+
+
+def test_extract_mic_reference_pcm_splits_stereo_frames() -> None:
+    frame = AudioFrame.from_ndarray(
+        np.array([[1, 10, 2, 20, 3, 30]], dtype=np.int16),
+        layout="stereo",
+    )
+
+    mic, reference = _extract_mic_reference_pcm(frame)
+
+    assert mic == b"\x01\x00\x02\x00\x03\x00"
+    assert reference == b"\x0a\x00\x14\x00\x1e\x00"
+
+
+def test_extract_mic_reference_pcm_keeps_mono_frames() -> None:
+    frame = AudioFrame.from_ndarray(np.array([[1, 2, 3]], dtype=np.int16), layout="mono")
+
+    mic, reference = _extract_mic_reference_pcm(frame)
+
+    assert mic == b"\x01\x00\x02\x00\x03\x00"
+    assert reference is None
 
 
 async def _track_frames_fixed_10ms_chunks() -> None:

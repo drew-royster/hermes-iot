@@ -88,6 +88,7 @@ typedef struct {
 esp_err_t board_audio_init(void);
 esp_err_t board_audio_read(void *dest, size_t size);
 esp_err_t board_audio_read_raw(void *dest, size_t size);
+esp_err_t board_audio_read_raw_pair(void *dest, size_t size);
 esp_err_t board_audio_write(const void *data, size_t size);
 esp_err_t board_audio_set_output_enabled(bool enabled);
 esp_err_t board_audio_set_volume(uint8_t volume_percent);
