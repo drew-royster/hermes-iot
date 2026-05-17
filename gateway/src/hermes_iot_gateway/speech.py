@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Protocol
@@ -45,6 +46,8 @@ class TextToSpeechProvider(Protocol):
     async def on_text_delta(self, session: DeviceSession, text: str) -> None: ...
 
     async def on_turn_complete(self, session: DeviceSession) -> None: ...
+
+    async def interrupt_output(self, session: DeviceSession) -> None: ...
 
 
 class DebugSpeechToTextProvider:
@@ -96,6 +99,9 @@ class NoOpTextToSpeechProvider:
         return None
 
     async def on_turn_complete(self, session: DeviceSession) -> None:
+        return None
+
+    async def interrupt_output(self, session: DeviceSession) -> None:
         return None
 
 
@@ -154,6 +160,16 @@ class SpeechRuntime:
 
     async def on_turn_complete(self, session: DeviceSession) -> None:
         await self._tts.on_turn_complete(session)
+
+    async def interrupt_output(self, session: DeviceSession) -> None:
+        await self._tts.interrupt_output(session)
+        output_track = session.output_track
+        clear_output = getattr(output_track, "clear", None)
+        if not callable(clear_output):
+            return
+        result = clear_output()
+        if inspect.isawaitable(result):
+            await result
 
     async def detach_session(self, session: DeviceSession) -> None:
         await self.pause_audio_ingest(session)

@@ -88,6 +88,14 @@ class GatewaySessionManager:
             session.active_turn.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await session.active_turn
+        await self._speech.interrupt_output(session)
+        await self._send(
+            session,
+            DataChannelMessage(
+                type="device.command",
+                payload={"type": "audio.output.clear", "reason": reason},
+            ),
+        )
         await self._set_assistant_state(session, "idle")
         await self._send(session, DataChannelMessage(type="assistant.state", payload={"state": "idle", "reason": reason}))
         if self._should_resume_after_interrupt(session, reason):
@@ -344,7 +352,7 @@ class GatewaySessionManager:
                 latency[key] = turn.metadata[key]
         session.device_state["_latency_turn"] = latency
         try:
-            session.capturing_audio = False
+            session.capturing_audio = not self._media_mode_active(session)
             session.device_state["last_assistant_text"] = ""
             await self._set_assistant_state(session, "thinking")
             await self._send(session, DataChannelMessage(type="assistant.state", payload={"state": "thinking"}))
@@ -795,7 +803,7 @@ class NativeGatewaySessionManager(GatewaySessionManager):
                 latency[key] = turn.metadata[key]
         session.device_state["_latency_turn"] = latency
         try:
-            session.capturing_audio = False
+            session.capturing_audio = not self._media_mode_active(session)
             session.device_state["last_assistant_text"] = ""
             await self._set_assistant_state(session, "thinking")
             await self._send(session, DataChannelMessage(type="assistant.state", payload={"state": "thinking"}))

@@ -32,6 +32,7 @@ class _FakeSpeech:
         self.resumed: list[str] = []
         self.attached_audio: list[str] = []
         self.detached: list[str] = []
+        self.interrupted_output: list[str] = []
 
     async def attach_audio_track(self, **kwargs):
         self.attached_audio.append(kwargs["session"].device_id)
@@ -62,6 +63,9 @@ class _FakeSpeech:
     async def on_turn_complete(self, session):
         return None
 
+    async def interrupt_output(self, session):
+        self.interrupted_output.append(session.device_id)
+
 
 class _BrokenHermes:
     async def stream_text_turn(self, **kwargs):
@@ -86,6 +90,18 @@ class _RecordedSlowHermes:
         yield HermesStreamEvent(kind="response.created", payload={"id": f"resp_{len(self.calls)}"})
         await asyncio.sleep(0.2)
         yield HermesStreamEvent(kind="assistant.text.delta", payload={"text": kwargs["text"]})
+        yield HermesStreamEvent(kind="response.completed", payload={"response": {"id": f"resp_{len(self.calls)}"}})
+
+
+class _RecordedSpeakingSlowHermes:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def stream_text_turn(self, **kwargs):
+        self.calls.append(kwargs)
+        yield HermesStreamEvent(kind="response.created", payload={"id": f"resp_{len(self.calls)}"})
+        yield HermesStreamEvent(kind="assistant.text.delta", payload={"text": kwargs["text"]})
+        await asyncio.sleep(0.2)
         yield HermesStreamEvent(kind="response.completed", payload={"response": {"id": f"resp_{len(self.calls)}"}})
 
 
@@ -407,6 +423,94 @@ async def _session_interrupt_roundtrip() -> None:
 
 def test_session_manager_resumes_listening_after_interrupt() -> None:
     asyncio.run(_session_interrupt_roundtrip())
+
+
+async def _session_keeps_capture_enabled_during_assistant_turn() -> None:
+    registry = InMemoryRegistry()
+    await registry.claim_device(
+        device_id="echo-capture-speaking",
+        firmware_version="0.0.1",
+        capabilities=["mic", "speaker"],
+    )
+    manager = GatewaySessionManager(registry, _SlowHermes(), _FakeSpeech())
+    session = await manager.create_session("echo-capture-speaking")
+    session.capturing_audio = True
+
+    async def _sender(_: dict) -> None:
+        return None
+
+    await manager.bind_sender(session.session_id, _sender)
+    await manager.handle_control_message(
+        session.session_id,
+        {"type": "debug.user_text", "payload": {"text": "keep listening"}},
+    )
+    await asyncio.sleep(0.05)
+
+    assert session.active_turn is not None
+    assert not session.active_turn.done()
+    assert session.capturing_audio is True
+
+    await session.active_turn
+
+
+def test_session_manager_keeps_capture_enabled_during_assistant_turn() -> None:
+    asyncio.run(_session_keeps_capture_enabled_during_assistant_turn())
+
+
+async def _session_barge_in_supersedes_speaking_turn_and_clears_output() -> None:
+    registry = InMemoryRegistry()
+    await registry.claim_device(
+        device_id="echo-barge-speaking",
+        firmware_version="0.0.1",
+        capabilities=["mic", "speaker"],
+    )
+    speech = _FakeSpeech()
+    hermes = _RecordedSpeakingSlowHermes()
+    manager = GatewaySessionManager(registry, hermes, speech)
+    session = await manager.create_session("echo-barge-speaking")
+
+    sent_messages: list[dict] = []
+
+    async def _sender(payload: dict) -> None:
+        sent_messages.append(payload)
+
+    await manager.bind_sender(session.session_id, _sender)
+    await manager.handle_control_message(
+        session.session_id,
+        {"type": "debug.user_text", "payload": {"text": "first turn"}},
+    )
+    for _ in range(20):
+        if session.assistant_state == "speaking":
+            break
+        await asyncio.sleep(0.01)
+    assert session.assistant_state == "speaking"
+    first_turn = session.active_turn
+
+    await manager.handle_control_message(
+        session.session_id,
+        {"type": "debug.user_text", "payload": {"text": "second turn"}},
+    )
+    assert first_turn is not None
+    assert session.active_turn is not None
+    assert session.active_turn is not first_turn
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await first_turn
+    await session.active_turn
+
+    clear_messages = [
+        msg
+        for msg in sent_messages
+        if msg["type"] == "device.command" and msg["payload"].get("type") == "audio.output.clear"
+    ]
+    assert [call["text"] for call in hermes.calls] == ["first turn", "second turn"]
+    assert speech.interrupted_output == ["echo-barge-speaking"]
+    assert clear_messages[0]["payload"]["reason"] == "superseded"
+    assert session.assistant_state == "listening"
+
+
+def test_session_barge_in_supersedes_speaking_turn_and_clears_output() -> None:
+    asyncio.run(_session_barge_in_supersedes_speaking_turn_and_clears_output())
 
 
 async def _session_supersedes_thinking_turn_roundtrip() -> None:

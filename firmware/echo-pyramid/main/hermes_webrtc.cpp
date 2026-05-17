@@ -448,6 +448,9 @@ void handle_device_command(const cJSON *payload) {
       free(config);
       s_audio_probe_running = false;
     }
+  } else if (strcmp(command_type->valuestring, "audio.output.clear") == 0) {
+    ESP_LOGI(LOG_TAG, "Clearing assistant playback");
+    hermes_media_reset_playback();
   } else if (strcmp(command_type->valuestring, "set_led") == 0) {
     const cJSON *color = cJSON_GetObjectItemCaseSensitive(payload, "color");
     const cJSON *pattern = cJSON_GetObjectItemCaseSensitive(payload, "pattern");

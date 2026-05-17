@@ -185,6 +185,7 @@ class DeepgramFluxSpeechToTextProvider:
 
             async def receive_events() -> None:
                 empty_update_count = 0
+                interrupted_turns: set[object] = set()
                 while True:
                     message = await websocket.recv()
                     if isinstance(message, bytes):
@@ -237,6 +238,23 @@ class DeepgramFluxSpeechToTextProvider:
                                     session.device_id,
                                     (now - started_at) * 1000,
                                 )
+                        if (
+                            transcript
+                            and session.assistant_state in {"thinking", "speaking", "tool"}
+                            and session.active_turn is not None
+                            and not session.active_turn.done()
+                        ):
+                            turn_key = payload.get("turn_index")
+                            if turn_key is None:
+                                turn_key = "current"
+                            if turn_key not in interrupted_turns:
+                                interrupted_turns.add(turn_key)
+                                logger.info(
+                                    "Flux barge-in detected for %s while assistant_state=%s",
+                                    session.device_id,
+                                    session.assistant_state,
+                                )
+                                await on_interrupt(session, "speech")
                         await emit(
                             session,
                             DataChannelMessage(
@@ -329,6 +347,7 @@ class DeepgramAuraTextToSpeechProvider:
         self._received_chunks: dict[str, int] = {}
         self._received_bytes: dict[str, int] = {}
         self._last_audio_at: dict[str, float] = {}
+        self._suppress_audio: dict[str, bool] = {}
 
     async def attach_output(self, session: DeviceSession, push_audio: Callable[[bytes], Awaitable[None]]) -> None:
         if session.session_id in self._connections:
@@ -346,6 +365,7 @@ class DeepgramAuraTextToSpeechProvider:
         self._received_chunks[session.session_id] = 0
         self._received_bytes[session.session_id] = 0
         self._last_audio_at.pop(session.session_id, None)
+        self._suppress_audio[session.session_id] = False
         logger.info(
             "Connected Aura for %s: model=%s sample_rate=%s encoding=%s",
             session.session_id,
@@ -367,11 +387,13 @@ class DeepgramAuraTextToSpeechProvider:
         self._received_chunks.pop(session.session_id, None)
         self._received_bytes.pop(session.session_id, None)
         self._last_audio_at.pop(session.session_id, None)
+        self._suppress_audio.pop(session.session_id, None)
 
     async def on_text_delta(self, session: DeviceSession, text: str) -> None:
         websocket = self._connections.get(session.session_id)
         if websocket is None or not text:
             return
+        self._suppress_audio[session.session_id] = False
         now = time.monotonic()
         latency = session.device_state.setdefault("_latency_turn", {})
         if "aura_first_text_at" not in latency:
@@ -385,6 +407,19 @@ class DeepgramAuraTextToSpeechProvider:
                 )
         logger.info("Sending Aura text delta for %s: chars=%s", session.session_id, len(text))
         await websocket.send(json.dumps({"type": "Speak", "text": text}))
+
+    async def interrupt_output(self, session: DeviceSession) -> None:
+        session_id = session.session_id
+        self._suppress_audio[session_id] = True
+        self._received_chunks[session_id] = 0
+        self._received_bytes[session_id] = 0
+        self._last_audio_at.pop(session_id, None)
+        websocket = self._connections.get(session_id)
+        if websocket is None:
+            return
+        with contextlib.suppress(Exception):
+            await websocket.send(json.dumps({"type": "Clear"}))
+        logger.info("Interrupted Aura output for %s", session_id)
 
     async def on_turn_complete(self, session: DeviceSession) -> None:
         websocket = self._connections.get(session.session_id)
@@ -429,6 +464,8 @@ class DeepgramAuraTextToSpeechProvider:
             message = await websocket.recv()
             if isinstance(message, bytes):
                 session_id = session.session_id
+                if self._suppress_audio.get(session_id, False):
+                    continue
                 now = time.monotonic()
                 session.device_state["last_assistant_audio_at"] = now
                 self._last_audio_at[session_id] = now

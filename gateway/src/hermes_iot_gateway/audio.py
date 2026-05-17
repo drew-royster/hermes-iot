@@ -51,6 +51,20 @@ class PCMQueueAudioTrack(AudioStreamTrack):
             self._playout_audio_end_at = max(self._playout_audio_end_at, now) + duration_seconds
             await self._queue.put(chunk)
 
+    async def clear(self) -> None:
+        self._buffer.clear()
+        self._playout_audio_end_at = time.monotonic()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        while True:
+            try:
+                self._chunks.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
     async def wait_for_playout_drain(
         self,
         *,

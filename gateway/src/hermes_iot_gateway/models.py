@@ -70,6 +70,7 @@ class DeviceCommandRequest(BaseModel):
         "audio_loopback",
         "audio.test",
         "audio.aec_probe",
+        "audio.output.clear",
         "media.mode",
         "end_conversation",
     ]

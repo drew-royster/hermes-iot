@@ -48,6 +48,22 @@ def test_pcm_queue_audio_track_backpressures_when_queue_is_full() -> None:
     asyncio.run(_track_backpressures_when_queue_is_full())
 
 
+async def _track_clear_drops_buffered_audio() -> None:
+    track = PCMQueueAudioTrack(sample_rate=16000, channels=1)
+    await track.push_pcm((b"\x01\x00" * 160) + (b"\x02\x00" * 160))
+
+    first = await track.recv()
+    await track.clear()
+    second = await track.recv()
+
+    assert bytes(first.planes[0]) == b"\x01\x00" * 160
+    assert bytes(second.planes[0]) == b"\x00\x00" * 160
+
+
+def test_pcm_queue_audio_track_clear_drops_buffered_audio() -> None:
+    asyncio.run(_track_clear_drops_buffered_audio())
+
+
 class _FakeSttProvider:
     def __init__(self) -> None:
         self.started = 0
@@ -68,6 +84,14 @@ class _FakeSttProvider:
                 raise
 
         return asyncio.create_task(_run())
+
+
+class _FakeTtsProvider(NoOpTextToSpeechProvider):
+    def __init__(self) -> None:
+        self.interrupted: list[str] = []
+
+    async def interrupt_output(self, session: DeviceSession) -> None:
+        self.interrupted.append(session.device_id)
 
 
 async def _speech_runtime_can_pause_and_resume_audio_ingest() -> None:
@@ -99,3 +123,27 @@ async def _speech_runtime_can_pause_and_resume_audio_ingest() -> None:
 
 def test_speech_runtime_can_pause_and_resume_audio_ingest() -> None:
     asyncio.run(_speech_runtime_can_pause_and_resume_audio_ingest())
+
+
+async def _speech_runtime_interrupt_output_clears_track() -> None:
+    stt = _FakeSttProvider()
+    tts = _FakeTtsProvider()
+    runtime = SpeechRuntime(stt, tts)
+    track = PCMQueueAudioTrack(sample_rate=16000, channels=1)
+    await track.push_pcm(b"\x01\x00" * 160)
+    session = DeviceSession(
+        session_id="session-1",
+        device_id="device-1",
+        conversation="iot:device-1",
+        output_track=track,
+    )
+
+    await runtime.interrupt_output(session)
+    frame = await track.recv()
+
+    assert tts.interrupted == ["device-1"]
+    assert bytes(frame.planes[0]) == b"\x00\x00" * 160
+
+
+def test_speech_runtime_interrupt_output_clears_track() -> None:
+    asyncio.run(_speech_runtime_interrupt_output_clears_track())
